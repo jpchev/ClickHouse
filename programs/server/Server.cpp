@@ -2743,6 +2743,13 @@ try
         systemdNotify("READY=1\n");
 #endif
 
+        auto stop_acme_instance = []{
+#if USE_SSL
+            /// Stop ACME tasks.
+            ACME::Client::instance().shutdown();
+#endif
+        };
+
         SCOPE_EXIT_SAFE({
             LOG_DEBUG(log, "Received termination signal.");
 
@@ -2754,10 +2761,7 @@ try
             main_config_reloader.reset();
             access_control.stopPeriodicReloading();
 
-#if USE_SSL
-            /// Stop ACME tasks.
-            ACME::Client::instance().shutdown();
-#endif
+            stop_acme_instance();
 
             is_cancelled = true;
 
