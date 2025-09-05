@@ -551,9 +551,6 @@ private:
             case NodeType::BinaryOperator:
                 return buildPieceForBinaryOperator(typeid_cast<const PrometheusQueryTree::BinaryOperator *>(node));
 
-            case NodeType::ScalarLiteral:
-                return buildPieceForScalarLiteral(typeid_cast<const PrometheusQueryTree::ScalarLiteral *>(node));
-
             default:
                 throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Prometheus query tree node type {} is not implemented", node_type);
         }

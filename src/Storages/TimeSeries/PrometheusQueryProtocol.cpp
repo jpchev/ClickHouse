@@ -44,7 +44,7 @@ PrometheusQueryProtocol::PrometheusQueryProtocol(ConstStoragePtr time_series_sto
 
 PrometheusQueryProtocol::~PrometheusQueryProtocol() = default;
 
-void PrometheusQueryProtocol::executeInstantQuery(
+void PrometheusQueryProtocol::  executeInstantQuery(
     WriteBuffer & response,
     const String & promql_query,
     const String & time_param)
@@ -73,11 +73,12 @@ void PrometheusQueryProtocol::executeInstantQuery(
         // Convert PromQL to SQL
         PrometheusQueryToSQLConverter converter(
             *query_tree,
-            evaluation_time,
             table_info,
             Field(300.0), // lookback_delta - 5 minutes default
             Field(15.0)   // default_resolution - 15 seconds
         );
+
+        converter.setEvaluationTime(evaluation_time);
 
         auto sql_query = converter.getSQL();
         if (!sql_query)
@@ -100,7 +101,7 @@ void PrometheusQueryProtocol::executeInstantQuery(
         Block result_block;
         while (executor.pull(result_block))
         {
-            if (result_block)
+            if (!result_block.empty())
             {
                 writeInstantQueryResponse(response, result_block);
                 return;
@@ -160,13 +161,14 @@ void PrometheusQueryProtocol::executeRangeQuery(
 
         Field lookback_delta = Field(end_time.safeGet<Float64>() - start_time.safeGet<Float64>());
 
-        PrometheusQueryToSQLConverter converter(
+        PrometheusQueryToSQLConverter converter
+        (
             *wrapped_query_tree,
-            end_time,     // evaluation time for the range query
             table_info,
             lookback_delta, // lookback_delta based on time range
             step          // resolution (step parameter)
         );
+        converter.setEvaluationTime(end_time);
 
         auto sql_query = converter.getSQL();
         if (!sql_query)
@@ -319,7 +321,7 @@ void DB::PrometheusQueryProtocol::writeInstantQueryResponse(WriteBuffer & respon
     LOG_INFO(log, "Prometheus block: {}", result_block.dumpStructure());
 
     // Determine result type based on block structure
-    bool is_scalar = result_block && result_block.has(TimeSeriesColumnNames::Scalar) && !result_block.has(TimeSeriesColumnNames::Tags);
+    bool is_scalar = !result_block.empty() && result_block.has(TimeSeriesColumnNames::Scalar) && !result_block.has(TimeSeriesColumnNames::Tags);
 
     if (is_scalar)
     {
@@ -342,7 +344,7 @@ void DB::PrometheusQueryProtocol::writeScalarResult(WriteBuffer & response, cons
 
     writeString("[", response);
 
-    if (result_block && result_block.rows() > 0)
+    if (!result_block.empty() && result_block.rows() > 0)
     {
         // Write timestamp
         if (result_block.has(TimeSeriesColumnNames::Timestamp))
@@ -380,7 +382,7 @@ void DB::PrometheusQueryProtocol::writeVectorResult(WriteBuffer & response, cons
 {
     writeString("[", response);
 
-    if (result_block && result_block.rows() > 0)
+    if (!result_block.empty() && result_block.rows() > 0)
     {
         for (size_t i = 0; i < result_block.rows(); ++i)
         {
@@ -403,11 +405,11 @@ void DB::PrometheusQueryProtocol::writeVectorResult(WriteBuffer & response, cons
             {
                 const auto & ts_column = result_block.getByName(TimeSeriesColumnNames::Timestamp).column;
                 auto timestamp = ts_column->getFloat64(i);
-                writeString(std::to_string(timestamp), response);
+                writeFloatText(std::round(timestamp * 100.0) / 100.0, response);
             }
             else
             {
-                writeString(std::to_string(time(nullptr)), response);
+                writeFloatText(std::round(time(nullptr) * 100.0) / 100.0, response);
             }
 
             writeString(",", response);
@@ -418,7 +420,7 @@ void DB::PrometheusQueryProtocol::writeVectorResult(WriteBuffer & response, cons
                 const auto & value_column = result_block.getByName(TimeSeriesColumnNames::Value).column;
                 auto value = value_column->getFloat64(i);
                 writeString("\"", response);
-                writeFloatText(value, response);
+                writeFloatText(std::round(value * 100.0) / 100.0, response);
                 writeString("\"", response);
             }
             else if (result_block.has(TimeSeriesColumnNames::Scalar))
@@ -426,7 +428,7 @@ void DB::PrometheusQueryProtocol::writeVectorResult(WriteBuffer & response, cons
                 const auto & scalar_column = result_block.getByName(TimeSeriesColumnNames::Scalar).column;
                 auto value = scalar_column->getFloat64(i);
                 writeString("\"", response);
-                writeFloatText(value, response);
+                writeFloatText(std::round(value * 100.0) / 100.0, response);
                 writeString("\"", response);
             }
             else
@@ -464,10 +466,6 @@ void DB::PrometheusQueryProtocol::writeMetricLabels(WriteBuffer & response, cons
                 {
                     String key = key_column.getDataAt(j).toString();
 
-                    // Skip __name__ label to match Prometheus behavior
-                    if (key == "__name__")
-                        continue;
-
                     if (!first)
                         writeString(",", response);
                     first = false;
@@ -497,7 +495,7 @@ void DB::PrometheusQueryProtocol::writeRangeQueryFooter(WriteBuffer & response)
 
 void DB::PrometheusQueryProtocol::writeRangeQueryResponse(WriteBuffer & response, const Block & result_block)
 {
-    if (result_block && result_block.rows() > 0)
+    if (!result_block.empty() && result_block.rows() > 0)
     {
         // For range queries, we need to group results by metric labels
         // This is a simplified implementation

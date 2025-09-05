@@ -343,7 +343,8 @@ public:
 
         // Handle both GET and POST requests properly
         // For POST requests, we need to provide the request body stream
-        params = std::make_unique<HTMLForm>(empty_settings, request, request.getStream());
+        auto stream = request.getStream();
+        params = std::make_unique<HTMLForm>(empty_settings, request, *stream);
 
         // Debug: Log all parameters that were parsed
         LOG_DEBUG(log(), "Parsed {} parameters:", params->size());

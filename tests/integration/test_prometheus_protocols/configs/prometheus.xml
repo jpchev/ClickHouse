@@ -34,7 +34,7 @@
                     <user>no_such_user</user>
                 </handler>
             </my_rule_4>
-            
+
             <!-- Query API endpoints -->
             <my_rule_5>
                 <url>/api/v1/query</url>
